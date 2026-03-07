@@ -79,11 +79,13 @@ impl FormatTimeZone {
 /// JavaScript `Intl.DateTimeFormat` object.
 #[derive(Debug, Clone, Trace, Finalize, JsData)]
 #[boa_gc(unsafe_empty_trace)] // Safety: No traceable types
+#[allow(dead_code)]
 pub(crate) struct DateTimeFormat {
     locale: Locale,
     _calendar_algorithm: Option<CalendarAlgorithm>, // TODO: Potentially remove ?
     time_zone: FormatTimeZone,
     fieldset: CompositeFieldSet,
+    formatter: DateTimeFormatter<CompositeFieldSet>,
     bound_format: Option<JsFunction>,
 }
 
@@ -263,15 +265,7 @@ impl DateTimeFormat {
                         // information about the specified calendar.
                         let fields = ToLocalTime::from_local_epoch_milliseconds(tz)?;
 
-                        let formatter = DateTimeFormatter::try_new_with_buffer_provider(
-                            context.intl_provider().erased_provider(),
-                            dtf.borrow().data().locale.clone().into(),
-                            dtf.borrow().data().fieldset,
-                        )
-                        .map_err(|e| {
-                            JsNativeError::range()
-                                .with_message(format!("failed to load formatter: {e}"))
-                        })?;
+                        let formatter = dtf.borrow().data().formatter.clone();
 
                         let dt = fields.to_formattable_datetime();
                         let tz_info = dtf.borrow().data().time_zone.to_time_zone_info();
@@ -626,6 +620,13 @@ fn create_date_time_format(
     // 33. If bestFormat has a field [[hour]], then
     // a. Set dateTimeFormat.[[HourCycle]] to hc.
     // 34. Return dateTimeFormat.
+    let formatter = DateTimeFormatter::try_new_with_buffer_provider(
+        context.intl_provider().erased_provider(),
+        resolved_locale.clone().into(),
+        fieldset,
+    )
+    .map_err(|e| JsNativeError::range().with_message(format!("failed to load formatter: {e}")))?;
+
     Ok(JsObject::from_proto_and_data(
         prototype,
         DateTimeFormat {
@@ -633,6 +634,7 @@ fn create_date_time_format(
             _calendar_algorithm: intl_options.preferences.calendar_algorithm,
             time_zone,
             fieldset,
+            formatter,
             bound_format: None,
         },
     ))
